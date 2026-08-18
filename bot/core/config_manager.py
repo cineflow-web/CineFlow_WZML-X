@@ -1,0 +1,320 @@
+from ast import literal_eval
+from importlib import import_module
+from os import getenv
+from wz_bin import bin_name
+
+
+class Config:
+    ALLDEBRID_API_KEY = ""
+    AS_DOCUMENT = False
+    AUTHORIZED_CHATS = ""
+    BASE_URL = ""
+    BOT_TOKEN = ""
+    HELPER_TOKENS = ""
+    HELPER_STRINGS = ""
+    HELPER_BOT_PROXIES = ""
+    HELPER_USER_PROXIES = ""
+    BOT_MAX_TASKS = 0
+    BOT_PM = False
+    CMD_SUFFIX = ""
+    COLORED_BTNS = True
+    DEFAULT_LANG = "en"
+    DATABASE_URL = ""
+    DEFAULT_UPLOAD = "rc"
+    DELETE_LINKS = False
+    DEBRID_LINK_API = ""
+    DISABLE_TORRENTS = False
+    DISABLE_LEECH = False
+    DISABLE_BULK = False
+    DISABLE_MULTI = False
+    DISABLE_SEED = False
+    DISABLE_FF_MODE = False
+    DISABLE_MEGA = False
+    DISABLE_JD = True
+    DISABLE_NZB = True
+    DISABLE_RSS = False
+    DISABLE_SEARCH = False
+    DISABLE_YTDLP = False
+    EQUAL_SPLITS = False
+    EXCLUDED_EXTENSIONS = ""
+    DISABLE_VIDTOOLS = ""
+    DISABLE_MULTI_VIDTOOLS = "trim watermark compress"
+    VIDTOOLS_FAST_MODE = False
+    LIB264_PRESET = "medium"
+    LIB265_PRESET = "medium"
+    HARDSUB_FONT_NAME = "Arial"
+    HARDSUB_FONT_SIZE = ""
+    COMPRESS_BANNER = ""
+    FFMPEG_CMDS = {}
+    FILELION_API = ""
+    MEDIA_STORE = True
+    FORCE_SUB_IDS = ""
+    GOFILE_API = ""
+    GOFILE_FOLDER_ID = ""
+    GOFILE_AUTO_CREATE_FOLDER = False
+    PIXELDRAIN_KEY = ""
+    PROTECTED_API = ""
+    BUZZHEAVIER_API = ""
+    DEVUPLOADS_KEY = ""
+    DEVUPLOADS_FOLDER = ""
+    VIKINGFILE_HASH = ""
+    VIKINGFILE_FOLDER = ""
+    GDRIVE_ID = ""
+    GD_DESP = "Uploaded with CineFlow Bot"
+    AUTHOR_NAME = "CineFlow"
+    AUTHOR_URL = "https://t.me/CineFlow_Update"
+    INSTADL_API = ""
+    IMDB_TEMPLATE = ""
+    IMAGES = []
+    IMG_SEARCH = ""
+    IMG_PAGE = 1
+    USE_IMAGES = False
+    IMG_SOURCES = ["wallpaperflare"]
+    INC_TASK_NOTIFY = False
+    INC_TASK_RESUME = False
+    INDEX_URL = ""
+    IS_TEAM_DRIVE = False
+    JD_EMAIL = ""
+    JD_PASS = ""
+    MEGA_EMAIL = ""
+    MEGA_PASSWORD = ""
+    DIRECT_LIMIT = 0
+    MEGA_LIMIT = 0
+    TORRENT_LIMIT = 0
+    GD_DL_LIMIT = 0
+    RC_DL_LIMIT = 0
+    CLONE_LIMIT = 0
+    JD_LIMIT = 0
+    NZB_LIMIT = 0
+    YTDLP_LIMIT = 0
+    PLAYLIST_LIMIT = 0
+    LEECH_LIMIT = 0
+    EXTRACT_LIMIT = 0
+    ARCHIVE_LIMIT = 0
+    STORAGE_LIMIT = 0
+    LEECH_DUMP_CHAT = ""
+    LINKS_LOG_ID = ""
+    MIRROR_LOG_ID = ""
+    LEECH_PREFIX = ""
+    LEECH_CAPTION = ""
+    LEECH_SUFFIX = ""
+    LEECH_FONT = ""
+    LEECH_SPLIT_SIZE = 2097152000
+    MEDIA_GROUP = False
+    USE_HYPER = True
+    HYPER_THREADS = 0
+    HYPER_PIPELINE = 4
+    HYPER_CHUNK = 512 * 1024
+    CPU_LIMIT = 20
+    THROTTLE_SERVICES = "auto"
+    HYDRA_IP = ""
+    HYDRA_API_KEY = ""
+    NAME_SWAP = ""
+    OWNER_ID = 0
+    QUEUE_ALL = 0
+    QUEUE_DOWNLOAD = 0
+    QUEUE_UPLOAD = 0
+    RCLONE_FLAGS = ""
+    RCLONE_PATH = ""
+    RCLONE_SERVE_URL = ""
+    SHOW_CLOUD_LINK = True
+    RCLONE_SERVE_USER = ""
+    RCLONE_SERVE_PASS = ""
+    RCLONE_SERVE_PORT = 8081
+    RSS_CHAT = ""
+    RSS_DELAY = 600
+    RSS_SIZE_LIMIT = 0
+    SEARCH_API_LINK = ""
+    SEARCH_LIMIT = 0
+    SEARCH_PLUGINS = []
+    SET_COMMANDS = True
+    STATUS_LIMIT = 10
+    STATUS_UPDATE_INTERVAL = 15
+    STOP_DUPLICATE = False
+    STREAMWISH_API = ""
+    SUDO_USERS = ""
+    TELEGRAM_API = 0
+    TELEGRAM_HASH = ""
+    TG_PROXY = None
+    THUMBNAIL_LAYOUT = ""
+    VERIFY_TIMEOUT = 0
+    LOGIN_PASS = ""
+    TORRENT_TIMEOUT = 0
+    TIMEZONE = "Asia/Kolkata"
+    USER_MAX_TASKS = 0
+    USER_TIME_INTERVAL = 0
+    UPLOAD_PATHS = {}
+    DRIVE_CATEGORY_MODE = False
+    DRIVE_CATEGORY_SA = ""
+    UPSTREAM_REPO = ""
+    UPSTREAM_BRANCH = "master"
+    USENET_SERVERS = []
+    USER_SESSION_STRING = ""
+    TRANSMISSION_MODE = "both"
+    USE_SERVICE_ACCOUNTS = False
+    ENABLE_TELEMETRY = True
+    WEB_ACCESS_PASSWORD = ""
+    WEB_PINCODE = True
+    YT_DLP_OPTIONS = {}
+    YT_DESP = "Uploaded with CineFlow bot"
+    YT_TAGS = ["telegram", "bot", "youtube"]
+    YT_CATEGORY_ID = 22
+    YT_PRIVACY_STATUS = "unlisted"
+
+    @classmethod
+    def get(cls, key):
+        return getattr(cls, key) if hasattr(cls, key) else None
+
+    @classmethod
+    def set(cls, key, value):
+        if hasattr(cls, key):
+            value = cls._convert_env_type(key, value)
+            setattr(cls, key, value)
+        else:
+            raise KeyError(f"{key} is not a valid configuration key.")
+
+    @classmethod
+    def get_all(cls):
+        return {
+            key: getattr(cls, key)
+            for key in cls.__dict__.keys()
+            if not key.startswith("__") and not callable(getattr(cls, key))
+        }
+
+    @classmethod
+    def load(cls):
+        cls.load_config()
+        cls.load_env()
+
+    @classmethod
+    def load_config(cls):
+        try:
+            settings = import_module("config")
+        except ModuleNotFoundError:
+            return
+        for attr in dir(settings):
+            if hasattr(cls, attr):
+                value = getattr(settings, attr)
+                if not value:
+                    continue
+                if isinstance(value, str):
+                    value = value.strip()
+                if attr == "DEFAULT_UPLOAD" and value != "gd":
+                    value = "rc"
+                elif attr in [
+                    "BASE_URL",
+                    "RCLONE_SERVE_URL",
+                    "INDEX_URL",
+                    "SEARCH_API_LINK",
+                ]:
+                    if value:
+                        value = value.strip("/")
+                elif attr == "USENET_SERVERS":
+                    try:
+                        if not value[0].get("host"):
+                            continue
+                    except Exception:
+                        continue
+                setattr(cls, attr, value)
+        for key in ["BOT_TOKEN", "OWNER_ID", "TELEGRAM_API", "TELEGRAM_HASH"]:
+            value = getattr(cls, key)
+            if isinstance(value, str):
+                value = value.strip()
+            if not value:
+                raise ValueError(f"{key} variable is missing!")
+
+    @classmethod
+    def load_env(cls):
+        config_vars = cls.get_all()
+        for key in config_vars:
+            env_value = getenv(key)
+            if env_value is not None:
+                converted_value = cls._convert_env_type(key, env_value)
+                cls.set(key, converted_value)
+
+    @classmethod
+    def _convert_env_type(cls, key, value):
+        original_value = getattr(cls, key, None)
+        if original_value is None:
+            return value
+        elif isinstance(original_value, bool):
+            if isinstance(value, bool):
+                return value
+            return str(value).lower() in ("true", "1", "yes")
+        elif isinstance(original_value, int):
+            if isinstance(value, int):
+                return value
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return original_value
+        elif isinstance(original_value, float):
+            if isinstance(value, float):
+                return value
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return original_value
+        elif isinstance(original_value, list):
+            if isinstance(value, list):
+                return value
+            if isinstance(value, str):
+                try:
+                    parsed = literal_eval(value)
+                    if isinstance(parsed, list):
+                        return parsed
+                except (ValueError, SyntaxError):
+                    pass
+                if value.startswith("[") and value.endswith("]"):
+                    return original_value
+                return [v.strip() for v in value.split(",") if v.strip()]
+            return original_value
+        elif isinstance(original_value, dict):
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, str):
+                try:
+                    parsed = literal_eval(value)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except (ValueError, SyntaxError):
+                    pass
+            return original_value
+        return value
+
+    @classmethod
+    def load_dict(cls, config_dict):
+        for key, value in config_dict.items():
+            if hasattr(cls, key):
+                if key == "DEFAULT_UPLOAD" and value != "gd":
+                    value = "rc"
+                elif key in [
+                    "BASE_URL",
+                    "RCLONE_SERVE_URL",
+                    "INDEX_URL",
+                    "SEARCH_API_LINK",
+                ]:
+                    if value:
+                        value = value.strip("/")
+                elif key == "USENET_SERVERS":
+                    try:
+                        if not value[0].get("host"):
+                            value = []
+                    except Exception:
+                        value = []
+                value = cls._convert_env_type(key, value)
+                setattr(cls, key, value)
+        for key in ["BOT_TOKEN", "OWNER_ID", "TELEGRAM_API", "TELEGRAM_HASH"]:
+            value = getattr(cls, key)
+            if isinstance(value, str):
+                value = value.strip()
+            if not value:
+                raise ValueError(f"{key} variable is missing!")
+
+
+class BinConfig:
+    ARIA2_NAME = bin_name(0)
+    QBIT_NAME = bin_name(1)
+    FFMPEG_NAME = bin_name(2)
+    RCLONE_NAME = bin_name(3)
+    SABNZBD_NAME = bin_name(4)
