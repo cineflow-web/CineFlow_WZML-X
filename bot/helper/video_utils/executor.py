@@ -570,19 +570,48 @@ class VidExecutor:
             await self._send_status()
             base_name = ospath.splitext(video)[0]
             keys = key if isinstance(key, list) else [key]
+            stream_info = (self.data or {}).get("stream", {})
+            ext_map = {"video": "mkv", "audio": extension[0], "subtitle": extension[1]}
             extracted = []
             for k in keys:
                 if k in ("video", "audio", "subtitle"):
-                    ext_map = {"video": "mkv", "audio": extension[0], "subtitle": extension[1]}
-                    outfile = f"{base_name}.{k}.{ext_map[k]}"
-                    cmd = self._base_cmd("-i", video, "-map", f"0:{k[0]}", "-c", "copy", outfile)
+                    matches = [
+                        idx for idx, info in stream_info.items() if info.get("type") == k
+                    ]
+                    if not matches:
+                        continue
+                    total_time = (await get_media_info(video))[0]
+                    if k == "video" or len(matches) == 1:
+                        outfile = f"{base_name}.{k}.{ext_map[k]}"
+                        cmd = self._base_cmd(
+                            "-i", video, "-map", f"0:{k[0]}", "-c", "copy", outfile
+                        )
+                        rcode = await self._run_cmd(cmd, total_time)
+                        if rcode == 0:
+                            extracted.append(outfile)
+                    else:
+                        # More than one stream of this type: srt/ass and raw
+                        # audio formats (aac/ac3/...) can only hold a single
+                        # track, so each stream needs its own output file
+                        # rather than being combined via a single "-map 0:s".
+                        for idx in matches:
+                            lang = stream_info[idx].get("lang") or str(idx)
+                            outfile = f"{base_name}.{k}.{lang}.{ext_map[k]}"
+                            cmd = self._base_cmd(
+                                "-i", video, "-map", f"0:{idx}", "-c", "copy", outfile
+                            )
+                            rcode = await self._run_cmd(cmd, total_time)
+                            if rcode == 0:
+                                extracted.append(outfile)
                 else:
-                    outfile = f"{base_name}.stream{k}.{extension[2]}"
+                    stype = stream_info.get(k, {}).get("type")
+                    stream_ext = ext_map.get(stype, extension[2])
+                    outfile = f"{base_name}.stream{k}.{stream_ext}"
                     cmd = self._base_cmd("-i", video, "-map", f"0:{k}", "-c", "copy", outfile)
-                total_time = (await get_media_info(video))[0]
-                rcode = await self._run_cmd(cmd, total_time)
-                if rcode == 0:
-                    extracted.append(outfile)
+                    total_time = (await get_media_info(video))[0]
+                    rcode = await self._run_cmd(cmd, total_time)
+                    if rcode == 0:
+                        extracted.append(outfile)
             results.extend(extracted or [video])
         return await self._final_path(results[0] if len(results) == 1 else "")
 

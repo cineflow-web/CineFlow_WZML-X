@@ -8,7 +8,6 @@ from pyrogram.types import CallbackQuery
 from time import time
 
 from . import VID_MODE
-from ..ext_utils.bot_utils import new_task
 from ..ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..telegram_helper.button_build import ButtonMaker
 from ..telegram_helper.message_utils import send_message, edit_message, delete_message
@@ -25,7 +24,6 @@ class ExtraSelect:
         self.extension = [None, None, "mkv"]
         self.status = ""
 
-    @new_task
     async def _event_handler(self):
         pfunc = partial(cb_extra, obj=self)
         handler = self._listener.client.add_handler(
@@ -224,7 +222,7 @@ class ExtraSelect:
         if extra_mode := getattr(self, f"{self.executor.mode}_select", None):
             await extra_mode(*args)
         await task
-        self.executor.event.set()
+        self.event.set()
         await delete_message(self._reply)
         if self.is_cancel:
             self._listener.is_cancelled = True
@@ -280,8 +278,24 @@ async def cb_extra(_, query: CallbackQuery, obj: ExtraSelect):
                         await query.answer("Please select at least one stream!", True)
                 case "audio" | "subtitle" as value:
                     await query.answer()
-                    obj.executor.data["key"] = value
-                    obj.event.set()
+                    matches = [
+                        k for k, v in ddict["stream"].items() if v["type"] == value
+                    ]
+                    all_selected = bool(matches) and all(
+                        m in ddict["sdata"] for m in matches
+                    )
+                    for m in matches:
+                        info = ddict["stream"][m]["info"]
+                        if all_selected:
+                            if m in ddict["sdata"]:
+                                ddict["sdata"].remove(m)
+                            ddict["stream"][m]["info"] = info.replace("✅ ", "")
+                        else:
+                            if m not in ddict["sdata"]:
+                                ddict["sdata"].append(m)
+                            if not info.startswith("✅ "):
+                                ddict["stream"][m]["info"] = f"✅ {info}"
+                    await obj.update_message(*obj.streams_select())
                 case "reverse":
                     if ddict["sdata"]:
                         await query.answer()
