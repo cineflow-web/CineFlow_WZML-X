@@ -300,10 +300,40 @@ class VidExecutor:
             style = self._hardsub_style(kwargs)
             escaped = subfile.replace("'", r"\'").replace(":", r"\:")
             vf = f"subtitles='{escaped}'{style}"
+            # Optional speed levers (both off by default):
+            # HARDSUB_HEIGHT downscales *before* the subtitle filter, so
+            # libass and x264 both work on fewer pixels.
+            if Config.HARDSUB_HEIGHT:
+                vf = (
+                    f"scale=-2:'min({int(Config.HARDSUB_HEIGHT)},ih)'"
+                    f":flags=fast_bilinear,{vf}"
+                )
+            # HARDSUB_FAST_DECODE skips the HEVC loop filter while decoding
+            # (much cheaper on 10-bit HEVC, slightly softer picture).
+            fast_dec = (
+                ["-skip_loop_filter", "all", "-flags2", "+fast"]
+                if Config.HARDSUB_FAST_DECODE
+                else []
+            )
+            # HARDSUB_CODEC = "libx265" gives ~30-40% smaller files at the
+            # same quality, but encodes noticeably slower than libx264.
+            use_hevc = str(Config.HARDSUB_CODEC).lower() in ("libx265", "x265", "hevc")
+            crf = str(Config.HARDSUB_CRF or (28 if use_hevc else 24))
+            if use_hevc:
+                venc = [
+                    "-c:v", "libx265", "-preset", Config.HARDSUB_PRESET,
+                    "-crf", crf, "-x265-params", "log-level=error",
+                    "-tag:v", "hvc1",
+                ]
+            else:
+                venc = [
+                    "-c:v", "libx264", "-preset", Config.HARDSUB_PRESET,
+                    "-tune", "fastdecode", "-crf", crf,
+                ]
             cmd = self._base_cmd(
+                *fast_dec,
                 "-i", video, "-map", "0:v:0", "-map", "0:a?", "-sn",
-                "-vf", vf, "-c:v", "libx264",
-                "-preset", Config.HARDSUB_PRESET, "-tune", "fastdecode", "-crf", "24",
+                "-vf", vf, *venc,
                 "-pix_fmt", "yuv420p", "-c:a", "copy",
                 "-movflags", "+faststart", outfile,
             )

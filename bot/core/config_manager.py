@@ -43,6 +43,10 @@ class Config:
     LIB264_PRESET = "veryfast"
     LIB265_PRESET = "veryfast"
     HARDSUB_PRESET = "ultrafast"
+    HARDSUB_CODEC = "libx264"
+    HARDSUB_CRF = 0
+    HARDSUB_HEIGHT = 0
+    HARDSUB_FAST_DECODE = False
     HARDSUB_FONT_NAME = "Arial"
     HARDSUB_FONT_SIZE = ""
     COMPRESS_BANNER = ""
