@@ -50,6 +50,11 @@ cpu_no = cpu_count() or 1
 threads = max(1, cpu_no // 2)
 cores = ",".join(str(i) for i in range(threads))
 
+# FFmpeg gets every core on small boxes (<=2 vCPU); the // 2 split above
+# would otherwise leave encodes running on a single thread/core.
+ff_threads = cpu_no if cpu_no <= 2 else threads
+ff_cores = ",".join(str(i) for i in range(ff_threads))
+
 if cpu_no <= 1 or cpu_no == 2:
     service_cores = ""
 else:

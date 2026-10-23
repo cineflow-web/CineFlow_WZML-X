@@ -40,8 +40,9 @@ class Config:
     DISABLE_VIDTOOLS = ""
     DISABLE_MULTI_VIDTOOLS = "trim watermark compress"
     VIDTOOLS_FAST_MODE = False
-    LIB264_PRESET = "medium"
-    LIB265_PRESET = "medium"
+    LIB264_PRESET = "veryfast"
+    LIB265_PRESET = "veryfast"
+    HARDSUB_PRESET = "ultrafast"
     HARDSUB_FONT_NAME = "Arial"
     HARDSUB_FONT_SIZE = ""
     COMPRESS_BANNER = ""

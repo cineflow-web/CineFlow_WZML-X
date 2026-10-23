@@ -10,7 +10,7 @@ import re
 
 from . import VID_MODE
 from .extra_selector import ExtraSelect
-from ... import LOGGER, task_dict, task_dict_lock, cores, threads
+from ... import LOGGER, task_dict, task_dict_lock, ff_cores, ff_threads
 from ...core.config_manager import Config, BinConfig
 from ..ext_utils.bot_lock import ff_lock
 from ..ext_utils.bot_utils import sync_to_async, cmd_exec
@@ -196,7 +196,7 @@ class VidExecutor:
             return -1
         self._eng.clear()
         self._eng._total_time = total_time or 1
-        full_cmd = (["taskset", "-c", f"{cores}"] if taskset else []) + cmd
+        full_cmd = (["taskset", "-c", f"{ff_cores}"] if taskset else []) + cmd
         async with ff_lock:
             self.listener.subproc = await create_subprocess_exec(
                 *full_cmd, stdout=PIPE, stderr=PIPE
@@ -223,7 +223,7 @@ class VidExecutor:
             "-progress",
             "pipe:1",
             "-threads",
-            f"{threads}",
+            f"{ff_threads}",
             *extra,
         ]
 
@@ -301,8 +301,11 @@ class VidExecutor:
             escaped = subfile.replace("'", r"\'").replace(":", r"\:")
             vf = f"subtitles='{escaped}'{style}"
             cmd = self._base_cmd(
-                "-i", video, "-vf", vf, "-c:v", "libx264",
-                "-preset", Config.LIB264_PRESET, "-c:a", "copy", outfile,
+                "-i", video, "-map", "0:v:0", "-map", "0:a?", "-sn",
+                "-vf", vf, "-c:v", "libx264",
+                "-preset", Config.HARDSUB_PRESET, "-tune", "fastdecode", "-crf", "24",
+                "-pix_fmt", "yuv420p", "-c:a", "copy",
+                "-movflags", "+faststart", outfile,
             )
         else:
             subs = [f for f in files if f != video]
