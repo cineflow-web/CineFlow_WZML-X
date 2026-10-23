@@ -295,11 +295,10 @@ class VidExecutor:
         base_name, ext = ospath.splitext(video)
         subfile = kwargs.get("subfile")
         has_subfile = subfile and await aiopath.exists(subfile)
+        tmp_ass = None
         if hardsub and has_subfile:
             outfile = f"{base_name}.hardsub.mp4"
-            style = self._hardsub_style(kwargs)
-            escaped = subfile.replace("'", r"\'").replace(":", r"\:")
-            vf = f"subtitles='{escaped}'{style}"
+            vf, tmp_ass = await self._hardsub_filter(subfile, kwargs)
             # Optional speed levers (both off by default):
             # HARDSUB_HEIGHT downscales *before* the subtitle filter, so
             # libass and x264 both work on fewer pixels.
@@ -369,10 +368,84 @@ class VidExecutor:
             cmd += ["-c", "copy", outfile]
         total_time = (await get_media_info(video))[0]
         rcode = await self._run_cmd(cmd, total_time)
+        if tmp_ass:
+            await clean_target(tmp_ass)
         if rcode != 0:
             return self._up_path
         await clean_target(video)
         return await self._final_path(outfile)
+
+    @staticmethod
+    def _patch_ass_styles(text, fontname, fontsize, colour, bold):
+        """Force font/size/colour/bold on every style of an ASS script
+        (the equivalent of the subtitles filter's force_style)."""
+        fmt, out = [], []
+        for line in text.split("\n"):
+            raw = line.rstrip("\r")
+            tail = line[len(raw):]
+            low = raw.lower()
+            if low.startswith("format:") and "fontname" in low:
+                fmt = [x.strip().lower() for x in raw.split(":", 1)[1].split(",")]
+            elif low.startswith("style:") and fmt:
+                head, vals = raw.split(":", 1)
+                vals = vals.lstrip().split(",")
+                if len(vals) >= len(fmt):
+                    for key, val in (
+                        ("fontname", fontname),
+                        ("fontsize", fontsize),
+                        ("primarycolour", f"&H{colour}&"),
+                        ("bold", "-1" if bold == "1" else "0"),
+                    ):
+                        if key in fmt:
+                            vals[fmt.index(key)] = str(val)
+                    raw = f"{head}: " + ",".join(vals)
+            out.append(raw + tail)
+        return "\n".join(out)
+
+    async def _hardsub_filter(self, subfile, kwargs):
+        """
+        Build the ffmpeg filter that burns `subfile` in. Returns
+        (filter_string, temp_ass_file_or_None).
+
+        The `subtitles` filter renders with libass' *simple* shaper, which
+        cannot reorder Sinhala vowel signs (e.g. ෙ ේ ො end up after the
+        consonant). So the subtitle is converted to ASS, styled, and drawn
+        with the `ass` filter using complex (HarfBuzz) shaping instead.
+        Falls back to the old `subtitles` filter if anything fails.
+        """
+
+        def esc(path):
+            return path.replace("'", r"\'").replace(":", r"\:")
+
+        fallback = (
+            f"subtitles='{esc(subfile)}'{self._hardsub_style(kwargs)}",
+            None,
+        )
+        assfile = f"{ospath.splitext(subfile)[0]}.hs.ass"
+        try:
+            _, _, code = await cmd_exec(
+                [
+                    BinConfig.FFMPEG_NAME, "-hide_banner", "-loglevel", "error",
+                    "-y", "-i", subfile, "-f", "ass", assfile,
+                ]
+            )
+            if code != 0 or not await aiopath.exists(assfile):
+                return fallback
+            with open(assfile, encoding="utf-8-sig", errors="replace") as f:
+                text = f.read()
+            fontname = (
+                kwargs.get("fontname") or Config.HARDSUB_FONT_NAME or "Arial"
+            ).replace("_", " ")
+            fontsize = kwargs.get("fontsize") or Config.HARDSUB_FONT_SIZE or "18"
+            colour = kwargs.get("fontcolour", "ffffff")
+            bold = "1" if kwargs.get("boldstyle") else "0"
+            text = self._patch_ass_styles(text, fontname, fontsize, colour, bold)
+            with open(assfile, "w", encoding="utf-8") as f:
+                f.write(text)
+            return f"ass='{esc(assfile)}':shaping=complex", assfile
+        except Exception as e:
+            LOGGER.error(f"Hardsub ASS conversion failed, using fallback: {e}")
+            return fallback
 
     def _hardsub_style(self, kwargs):
         fontname = (kwargs.get("fontname") or Config.HARDSUB_FONT_NAME or "Arial").replace(
@@ -440,10 +513,10 @@ class VidExecutor:
             # implicit stream auto-selection, which gets ambiguous once a
             # filter_complex graph is involved.
             chain = f"[1:v]scale={scale}[wm];[0:v][wm]{overlay}"
+            wm_ass = None
             if hardsub and subfile and await aiopath.exists(subfile):
-                style = self._hardsub_style(kwargs)
-                escaped = subfile.replace("'", r"\'").replace(":", r"\:")
-                chain += f",subtitles='{escaped}'{style}"
+                sub_filter, wm_ass = await self._hardsub_filter(subfile, kwargs)
+                chain += f",{sub_filter}"
             if quality and quality in self._qual:
                 chain += f",scale={self._qual[quality]}:-2"
             filter_complex = f"{chain}[vout]"
@@ -456,6 +529,8 @@ class VidExecutor:
             )
             total_time = (await get_media_info(video))[0]
             rcode = await self._run_cmd(cmd, total_time)
+            if wm_ass:
+                await clean_target(wm_ass)
             if rcode == 0:
                 await clean_target(video)
                 results.append(outfile)

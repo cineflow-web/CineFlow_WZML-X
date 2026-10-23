@@ -222,8 +222,9 @@ class SelectMode:
                 case "fontname":
                     _buttons_style(name=False)
                     for btn in [
-                        "Arial", "Impact", "Verdana", "Consolas",
-                        "DejaVu_Sans", "Comic_Sans_MS", "Simple_Day_Mistu",
+                        "Iskoola_Pota", "Noto_Sans_Sinhala", "Arial", "Impact",
+                        "Verdana", "Consolas", "DejaVu_Sans", "Comic_Sans_MS",
+                        "Simple_Day_Mistu",
                     ]:
                         buttons.data_button(
                             f"{'✅ ' if btn == self.extra_data.get('fontname') else ''}{btn.replace('_', ' ')}",

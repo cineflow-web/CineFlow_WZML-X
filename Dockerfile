@@ -6,6 +6,10 @@ RUN apt-get update \
  && fc-cache -f \
  && rm -rf /var/lib/apt/lists/*
 
+# Bundled Sinhala font (family name: "Iskoola Pota") for hardsub
+COPY fonts/ /usr/local/share/fonts/custom/
+RUN fc-cache -f
+
 WORKDIR /usr/src/app
 
 COPY requirements.txt .
