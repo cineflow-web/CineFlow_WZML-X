@@ -1,3 +1,4 @@
+from contextlib import suppress
 from ast import literal_eval
 from base64 import b64encode
 from os import path as ospath
@@ -8,6 +9,7 @@ from aiofiles.os import path as aiopath
 from bot.core.config_manager import Config
 
 from .. import DOWNLOAD_DIR, LOGGER, bot_loop, task_dict_lock
+from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.ext_utils.bot_utils import (
     COMMAND_USAGE,
     arg_parser,
@@ -281,13 +283,13 @@ class Mirror(TaskListener):
                         for fd_name in self.same_dir:
                             self.same_dir[fd_name]["total"] -= 1
         else:
-            await self.init_bulk(input_list, bulk_start, bulk_end, Mirror)
+            await self.init_bulk(input_list, bulk_start, bulk_end, type(self))
             return
 
         if len(self.bulk) != 0:
             del self.bulk[0]
 
-        await self.run_multi(input_list, Mirror)
+        await self.run_multi(input_list, type(self))
 
         await self.get_tag(text)
 
@@ -318,7 +320,7 @@ class Mirror(TaskListener):
                 nextmsg.from_user = self.user
             else:
                 nextmsg.sender_chat = self.user
-            await Mirror(
+            await type(self)(
                 self.client,
                 nextmsg,
                 self.is_qbit,
@@ -524,6 +526,34 @@ class Mirror(TaskListener):
                     f" authorization: Basic {b64encode(auth.encode()).decode('ascii')}"
                 )
             await add_aria2_download(self, path, headers, ratio, seed_time)
+
+
+class SubsMirror(Mirror):
+    """Leech pipeline + subtitle extract/rename step (see TaskListener)."""
+
+    subs_mode = True
+
+
+async def subs(client, message):
+    if Config.DISABLE_LEECH:
+        await message.reply("The Leech command is currently disabled.")
+        return
+    rply = message.reply_to_message
+    if not rply or not (rply.document or rply.media_group_id):
+        await send_message(
+            message,
+            f"<b>Usage:</b> reply to a sub <code>.zip</code> (or a group of zips) with "
+            f"<code>/{BotCommands.SubsCommand[0]}</code>\n"
+            "Each sub is sent as <code>Name Year si.srt</code> (series: <code>Name S01E01 si.srt</code>).",
+        )
+        return
+    if " -i " not in f"{message.text} " and rply.media_group_id:
+        with suppress(Exception):
+            grp = await client.get_media_group(rply.chat.id, rply.id)
+            n = len([m for m in grp if m.document and m.id >= rply.id])
+            if n > 1:
+                message.text = f"{message.text.strip()} -i {n}"
+    bot_loop.create_task(SubsMirror(client, message, is_leech=True).new_event())
 
 
 async def mirror(client, message):

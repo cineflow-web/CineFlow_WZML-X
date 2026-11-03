@@ -3,7 +3,8 @@ from html import escape
 from time import time
 from mimetypes import guess_type
 from contextlib import suppress
-from os import path as ospath
+from os import path as ospath, walk, rename
+from shutil import rmtree
 from pyrogram.enums import ButtonStyle
 
 from aiofiles.os import listdir, remove, path as aiopath
@@ -229,7 +230,33 @@ class TaskListener(TaskConfig):
         if self.join and not self.is_file:
             await join_files(up_path)
 
-        if self.extract and not self.is_nzb:
+        if getattr(self, "subs_mode", False):
+            from ..ext_utils.subs_utils import process as subs_process
+
+            work = f"{self.dir}_subswork"
+            stem = ospath.splitext(self.name)[0]
+            out_dir = f"{up_dir}/{stem}__subs"
+            srcs = [up_path]
+            if not self.is_file:
+                srcs = [
+                    ospath.join(r, f) for r, _, fs in walk(up_path) for f in fs
+                ]
+            files = await sync_to_async(subs_process, srcs, work, out_dir)
+            await sync_to_async(rmtree, work, True)
+            if not files:
+                await self.on_upload_error("No subtitle files found in the archive.")
+                return
+            await clean_target(up_path)
+            final = f"{up_dir}/{stem}"
+            await sync_to_async(rename, out_dir, final)
+            up_path = final
+            self.name = stem
+            self.is_file = False
+            self.size = await get_path_size(final)
+            self.as_doc = True
+            self.clear()
+
+        if self.extract and not self.is_nzb and not getattr(self, "subs_mode", False):
             up_path = await self.proceed_extract(up_path, gid)
             if self.is_cancelled:
                 return
