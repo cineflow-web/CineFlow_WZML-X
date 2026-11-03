@@ -329,6 +329,7 @@ async def _runtime_reload():
         "bot.modules.help",
         "bot.modules.images",
         "bot.modules.mediainfo",
+        "bot.modules.subs",
         "bot.modules.category_select",
         "bot.modules.broadcast",
         "bot.modules.mirror_leech",

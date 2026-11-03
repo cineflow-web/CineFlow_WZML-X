@@ -20,6 +20,7 @@ from .gd_search import gdrive_search, select_type
 from .help import arg_usage, bot_help
 from .images import picture_add, pictures, pics_callback
 from .mediainfo import mediainfo
+from .subs import subs_cmd
 from .category_select import change_category, confirm_category
 from .broadcast import broadcast
 from .mirror_leech import (
@@ -108,6 +109,7 @@ __all__ = [
     "pictures",
     "pics_callback",
     "mediainfo",
+    "subs_cmd",
     "broadcast",
     "change_category",
     "confirm_category",

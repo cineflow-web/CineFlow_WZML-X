@@ -422,6 +422,7 @@ def get_bot_commands():
         "List": "[query] Search any Text which is available in GDrive",
         "Search": "[query] Search torrents via Qbit Plugins",
         "MediaInfo": "[reply/link] Get MediaInfo of the Target Media",
+        "Subs": "[reply zip(s)] Extract subs, rename to Name Year si.srt, upload each as srt",
         "Select": "[gid/reply] Select files for NZB, Aria2, Qbit Tasks",
         "Ping": "Ping Bot to test Response Speed",
         "Status": "[id/me] Tasks Status of Bot",
