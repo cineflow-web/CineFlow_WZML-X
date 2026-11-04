@@ -5,7 +5,7 @@ from zipfile import ZipFile, BadZipFile
 
 SUB_EXTS = (".srt", ".ass", ".vtt", ".sub")
 _YEAR = re_compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
-_SITE = re_compile(r"^\s*(?:www\.)?[\w-]+(?:\.[\w-]+)+\s*-\s*")
+_SITE = re_compile(r"^\s*(?:www\.)?[\w-]+(?:\.[\w-]+)+[\s_]+-[\s_]+")
 _BAD = re_compile(r'[\\/:*?"<>|]')
 
 
