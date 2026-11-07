@@ -115,7 +115,11 @@ async def add_sudo(_, message):
     id_ = ""
     msg = message.text.split()
     if len(msg) > 1:
-        id_ = int(msg[1].strip())
+        try:
+            id_ = int(msg[1].strip())
+        except ValueError:
+            await send_message(message, "Invalid ID! Give a numeric user ID or reply to a message.")
+            return
     elif reply_to := message.reply_to_message:
         id_ = (reply_to.from_user or reply_to.sender_chat).id
     if id_:
@@ -135,7 +139,11 @@ async def remove_sudo(_, message):
     id_ = ""
     msg = message.text.split()
     if len(msg) > 1:
-        id_ = int(msg[1].strip())
+        try:
+            id_ = int(msg[1].strip())
+        except ValueError:
+            await send_message(message, "Invalid ID! Give a numeric user ID or reply to a message.")
+            return
     elif reply_to := message.reply_to_message:
         id_ = (reply_to.from_user or reply_to.sender_chat).id
     if id_:

@@ -376,6 +376,12 @@ def new_task(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
         task = bot_loop.create_task(func(*args, **kwargs))
+
+        def _log_failure(t, _name=func.__name__):
+            if not t.cancelled() and (exc := t.exception()):
+                LOGGER.error(f"Handler '{_name}' failed: {exc!r}", exc_info=exc)
+
+        task.add_done_callback(_log_failure)
         return task
 
     return wrapper

@@ -24,9 +24,14 @@ from ..helper.telegram_helper.message_utils import (
 @new_task
 async def cancel(_, message):
     user_id = (message.from_user or message.sender_chat).id
-    msg = message.text.split("_", maxsplit=1)
-    if len(msg) > 1:
-        cmd_data = msg[1].split("@", maxsplit=1)
+    text = message.text
+    first_line = text.split("\n")[0]
+    # "/cancel GID" -> "/cancel_GID" (same trick the select command uses)
+    if " " in first_line and "_" not in first_line.split(" ", 1)[0]:
+        text = text.replace(" ", "_", 1)
+    msg = text.split("_", maxsplit=1)
+    if len(msg) > 1 and msg[1].strip():
+        cmd_data = msg[1].split()[0].split("@", maxsplit=1)
         if len(cmd_data) > 1 and cmd_data[1].strip() != TgClient.BNAME:
             return
         gid = cmd_data[0]
@@ -44,7 +49,7 @@ async def cancel(_, message):
         if task is None:
             await send_message(message, "This is not an active task!")
             return
-    elif len(msg) == 1:
+    else:
         msg = (
             "Reply to an active Command message which was used to start the download"
             f" or send <code>/{BotCommands.CancelTaskCommand[0]} GID</code> to cancel it!"

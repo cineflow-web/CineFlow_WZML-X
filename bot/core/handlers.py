@@ -1,5 +1,7 @@
 # ruff: noqa: F403, F405
 
+from re import escape
+
 from pyrogram.filters import command, regex
 from pyrogram.handlers import CallbackQueryHandler, EditedMessageHandler, MessageHandler
 from pyrogram.types import BotCommand
@@ -10,6 +12,13 @@ from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.filters import CustomFilters
 from ..modules import *
 from .tg_client import TgClient
+
+
+def _cmd_gid_regex(cmds):
+    """Regex matching `/<cmd>_<gid>` for every alias of a command."""
+    names = cmds if isinstance(cmds, list) else [cmds]
+    alt = "|".join(escape(c) for c in sorted(names, key=len, reverse=True))
+    return rf"^/(?:{alt})_\w+.*$"
 
 
 async def add_handlers():
@@ -80,10 +89,19 @@ async def add_handlers():
             edit_bot_settings, filters=regex("^botset") & CustomFilters.sudo
         )
     )
+    # /c_GID, /cancel_GID (tap-links from status message)
     TgClient.bot.add_handler(
         MessageHandler(
             cancel,
-            filters=regex(rf"^/{BotCommands.CancelTaskCommand[1]}?(?:_\w+).*$")
+            filters=regex(_cmd_gid_regex(BotCommands.CancelTaskCommand))
+            & CustomFilters.authorized,
+        )
+    )
+    # /cancel, /c, /cancel GID (plain command or reply to the task's command)
+    TgClient.bot.add_handler(
+        MessageHandler(
+            cancel,
+            filters=command(BotCommands.CancelTaskCommand, case_sensitive=True)
             & CustomFilters.authorized,
         )
     )
@@ -128,10 +146,19 @@ async def add_handlers():
             & CustomFilters.sudo,
         )
     )
+    # /sel_GID, /select_GID (tap-links)
     TgClient.bot.add_handler(
         MessageHandler(
             select,
-            filters=regex(rf"^/{BotCommands.SelectCommand[1]}?(?:_\w+).*$")
+            filters=regex(_cmd_gid_regex(BotCommands.SelectCommand))
+            & CustomFilters.authorized,
+        )
+    )
+    # /select, /sel, /select GID (plain command or reply to the task's command)
+    TgClient.bot.add_handler(
+        MessageHandler(
+            select,
+            filters=command(BotCommands.SelectCommand, case_sensitive=True)
             & CustomFilters.authorized,
         )
     )
