@@ -21,7 +21,34 @@ def _cmd_gid_regex(cmds):
     return rf"^/(?:{alt})_\w+.*$"
 
 
+_registered = []
+
+
 async def add_handlers():
+    """Register all handlers. Handlers from a previous call are dropped first, so
+    it can be re-run safely (e.g. after CMD_SUFFIX changes) without stale names."""
+    bot = TgClient.bot
+    for handler, group, client in _registered:
+        try:
+            client.remove_handler(handler, group)
+        except Exception:
+            pass
+    _registered.clear()
+
+    orig = bot.add_handler
+
+    def tracked(handler, group=0):
+        _registered.append((handler, group, bot))
+        return orig(handler, group)
+
+    bot.add_handler = tracked
+    try:
+        await _add_all_handlers()
+    finally:
+        bot.add_handler = orig
+
+
+async def _add_all_handlers():
     TgClient.bot.add_handler(
         MessageHandler(
             authorize,

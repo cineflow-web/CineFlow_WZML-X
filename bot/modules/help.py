@@ -10,7 +10,7 @@ from ..helper.telegram_helper.message_utils import (
     delete_message,
     send_message,
 )
-from ..helper.ext_utils.help_messages import help_string
+from ..helper.ext_utils.help_messages import get_help_string
 
 
 @new_task
@@ -44,4 +44,4 @@ async def arg_usage(_, query):
 
 @new_task
 async def bot_help(_, message):
-    await send_message(message, help_string)
+    await send_message(message, get_help_string())

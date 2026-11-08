@@ -159,7 +159,8 @@ async def login(_, message):
         )
     else:
         await send_message(
-            message, "<b>Bot Login Usage :</b>\n\n<code>/login [password]</code>"
+            message,
+            f"<b>Bot Login Usage :</b>\n\n<code>/{BotCommands.LoginCommand} [password]</code>",
         )
 
 

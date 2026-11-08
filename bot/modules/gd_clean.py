@@ -1,5 +1,6 @@
 from pyrogram.enums import ButtonStyle
 
+from ..helper.telegram_helper.bot_commands import BotCommands
 from .. import bot_cache, bot_loop, categories_dict, user_data
 from ..core.config_manager import Config
 from ..helper.ext_utils.bot_utils import arg_parser, fetch_drive_cat, new_task
@@ -33,7 +34,7 @@ class GDClean(TaskListener):
         if link and not is_gdrive_link(link):
             return await send_message(
                 self.message,
-                "Provide a valid GDrive link or use /gdclean -gc <category>",
+                f"Provide a valid GDrive link or use /{BotCommands.GDCleanCommand[0]} -gc <category>",
             )
         self.link = link
         obj = GoogleDriveClean(self)

@@ -1,4 +1,5 @@
 from contextlib import suppress
+from ..helper.telegram_helper.bot_commands import BotCommands
 from pyrogram.enums import ButtonStyle
 from re import IGNORECASE, findall, search
 
@@ -85,7 +86,7 @@ async def imdb_search(_, message):
     else:
         await send_message(
             message,
-            "<i>Send Movie / TV Series Name along with /imdb Command or send IMDB URL</i>",
+            f"<i>Send Movie / TV Series Name along with /{BotCommands.IMDBCommand} Command or send IMDB URL</i>",
         )
 
 

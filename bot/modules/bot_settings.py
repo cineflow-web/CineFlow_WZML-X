@@ -161,7 +161,7 @@ DEFAULT_DESP = {
     "AUTHOR_URL": "Author URL for Telegraph pages. Use channel URL for join button.",
     "INSTADL_API": "Instagram downloader API key.",
     "IMDB_TEMPLATE": "Optional HTML template for IMDB results. If empty, uses Rich Messages.",
-    "IMAGES": "List of image URLs or file_ids for the gallery. Managed via /addimage command.",
+    "IMAGES": "List of image URLs or file_ids for the gallery. Managed via the add-image command (see /help).",
     "IMG_SEARCH": "Comma-separated keywords to auto-fetch wallpaper images on startup. e.g. anime, nature, space",
     "IMG_PAGE": "Number of pages to search for each keyword in IMG_SEARCH. Each page has ~70 images. Default: 1",
     "USE_IMAGES": "Enable random photo backgrounds on bot messages. Requires IMAGES list. Default: False",
@@ -655,6 +655,12 @@ async def edit_variable(_, message, pre_message, key):
     Config.set(key, value)
     if key == "CMD_SUFFIX":
         BotCommands.refresh_commands()
+        from ..core.handlers import add_handlers
+
+        await add_handlers()  # re-register handlers (and bot menu) with new names
+        from ..modules.plugin_manager import register_plugin_commands
+
+        register_plugin_commands()
     await update_buttons(pre_message, key, "editvar", False)
     await delete_message(message)
     await database.update_config({key: value})

@@ -294,8 +294,8 @@ Set different metadata for audio/video/subtitle streams in User Settings > FFmpe
 • <b>Subtitle Metadata:</b> Applied to subtitle streams
 
 <b>Examples:</b>
-<code>/mirror link -meta title=My Movie|artist={audiolang} Version</code>
-<code>/yt link -meta album={basename}|year={year}|genre=Action</code>
+<code>/cmd link -meta title=My Movie|artist={audiolang} Version</code>
+<code>/cmd link -meta album={basename}|year={year}|genre=Action</code>
 
 <b>Escape Pipes:</b> Use <code>\\|</code> to include literal pipe in values:
 <code>title=Movie \\| Director's Cut</code>
