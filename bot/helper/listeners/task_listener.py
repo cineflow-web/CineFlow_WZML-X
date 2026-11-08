@@ -231,7 +231,7 @@ class TaskListener(TaskConfig):
             await join_files(up_path)
 
         if getattr(self, "subs_mode", False):
-            from ..ext_utils.subs_utils import process as subs_process
+            from ..ext_utils.subs_utils import process as subs_process, skipped_message
 
             work = f"{self.dir}_subswork"
             stem = ospath.splitext(self.name)[0]
@@ -241,10 +241,15 @@ class TaskListener(TaskConfig):
                 srcs = [
                     ospath.join(r, f) for r, _, fs in walk(up_path) for f in fs
                 ]
-            files = await sync_to_async(subs_process, srcs, work, out_dir)
+            skipped = []
+            files = await sync_to_async(subs_process, srcs, work, out_dir, skipped)
             await sync_to_async(rmtree, work, True)
             if not files:
-                await self.on_upload_error("No subtitle files found in the archive.")
+                await self.on_upload_error(
+                    skipped_message(skipped)
+                    if skipped
+                    else "No subtitle files found in the archive."
+                )
                 return
             await clean_target(up_path)
             final = f"{up_dir}/{stem}"

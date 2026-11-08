@@ -8,7 +8,7 @@ from pyrogram.types import InputMediaDocument
 from .. import LOGGER
 from ..core.tg_client import TgClient
 from ..helper.ext_utils.bot_utils import new_task, sync_to_async
-from ..helper.ext_utils.subs_utils import SUB_EXTS, process
+from ..helper.ext_utils.subs_utils import SUB_EXTS, process, skipped_message
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.message_utils import (
     send_message,
@@ -67,9 +67,17 @@ async def subs_cmd(_, message):
             if p:
                 paths.append(str(p))
         await edit_message(status, "<i>Extracting & renaming...</i>")
-        files = await sync_to_async(process, paths, work, ospath.join(work, "out"))
+        skipped = []
+        files = await sync_to_async(
+            process, paths, work, ospath.join(work, "out"), skipped
+        )
         if not files:
-            return await edit_message(status, "No subtitle files found in the archive(s).")
+            return await edit_message(
+                status,
+                skipped_message(skipped)
+                if skipped
+                else "No subtitle files found in the archive(s).",
+            )
         await edit_message(status, f"<i>Uploading {len(files)} subtitle(s)...</i>")
         for i in range(0, len(files), 10):
             chunk = files[i : i + 10]

@@ -23,7 +23,7 @@ def parse_name(raw):
     m = _YEAR.search(stem)
     cut = min([x.start() for x in (m, ep) if x] or [0])
     if not m and not ep:
-        return None
+        return None  # movies need a year, series need SxxExx
     title = stem[:cut]
     title = title.replace("&", " and ").replace("_", " ").replace(".", " ")
     title = re_sub(r"[\(\)\[\]]", " ", title)
@@ -45,7 +45,7 @@ def _is_junk(name):
     return "__MACOSX" in name or ospath.basename(name).startswith("._")
 
 
-def collect_subs(zip_path, work_dir, hint=None, depth=0):
+def collect_subs(zip_path, work_dir, hint=None, depth=0, skipped=None):
     """Recursively extract zips; return list of (final_name, file_path)."""
     out = []
     if depth > 4:
@@ -66,10 +66,14 @@ def collect_subs(zip_path, work_dir, hint=None, depth=0):
         p = ospath.join(ext_dir, i.filename)
         low = i.filename.lower()
         if low.endswith(".zip"):
-            out += collect_subs(p, work_dir, ospath.basename(i.filename), depth + 1)
+            out += collect_subs(
+                p, work_dir, ospath.basename(i.filename), depth + 1, skipped
+            )
         elif low.endswith(SUB_EXTS):
             parsed = base_hint or parse_name(i.filename)
             if not parsed:
+                if skipped is not None:
+                    skipped.append(ospath.basename(i.filename))
                 continue
             ext = ospath.splitext(low)[1]
             out.append((f"{parsed}{ext}", p))
@@ -93,17 +97,28 @@ def build_files(items, out_dir):
     return res
 
 
-def process(paths, work_dir, out_dir):
+def process(paths, work_dir, out_dir, skipped=None):
     """paths: downloaded files (.zip or sub). Returns list of renamed sub paths."""
     items = []
     for p in paths:
         low = p.lower()
         if low.endswith(".zip"):
-            items += collect_subs(p, work_dir, ospath.basename(p))
+            items += collect_subs(p, work_dir, ospath.basename(p), skipped=skipped)
         elif low.endswith(SUB_EXTS):
             parsed = parse_name(p)
             if parsed:
-                items.append(
-                    (f"{parsed}{ospath.splitext(low)[1]}", p)
-                )
+                items.append((f"{parsed}{ospath.splitext(low)[1]}", p))
+            elif skipped is not None:
+                skipped.append(ospath.basename(p))
     return build_files(items, out_dir) if items else []
+
+
+NAME_HELP = (
+    "Name must include the <b>year</b> for movies (<code>The Odyssey 2026.zip</code>) "
+    "or <b>SxxExx</b> for series (<code>Show 2020 S01E02.zip</code>)."
+)
+
+
+def skipped_message(skipped):
+    names = "\n".join(f"• <code>{n}</code>" for n in skipped[:10])
+    return f"Skipped (no year / SxxExx in name):\n{names}\n\n{NAME_HELP}"
