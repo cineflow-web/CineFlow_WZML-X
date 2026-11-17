@@ -11,4 +11,5 @@ VID_MODE = {
     "rmstream": "Remove Stream",
     "extract": "Extract Stream",
     "convert": "Convert Resolution",
+    "swf2vid": "SWF to MP4/MKV",
 }

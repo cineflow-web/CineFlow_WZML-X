@@ -91,6 +91,8 @@ class SelectMode:
                     msg += f"\nFont Size: <b>{fontsize}</b>"
                 if fontcolour := self.extra_data.get("fontcolour"):
                     msg += f"\nFont Colour: <b>{fontcolour}</b>"
+        if self.mode == "swf2vid":
+            msg += f"\nOutput Format: <b>{self.extra_data.get('format', 'mp4').upper()}</b>"
         if quality := self.extra_data.get("quality"):
             msg += f"\nQuality: <b>{quality}</b>"
         if self.mode == "watermark" and (wmsize := self.extra_data.get("wmsize")):
@@ -164,6 +166,15 @@ class SelectMode:
                     "vidtool subfile",
                     "header",
                 )
+
+            if self.mode == "swf2vid":
+                swf_fmt = self.extra_data.get("format", "mp4")
+                for fmt in ("mp4", "mkv"):
+                    buttons.data_button(
+                        f"{'✅ ' if swf_fmt == fmt else ''}{fmt.upper()}",
+                        f"vidtool swfformat {fmt}",
+                        "header",
+                    )
 
             if self.mode in ("compress", "watermark") or self.extra_data.get("hardsub"):
                 buttons.data_button("Quality", "vidtool quality", "header")
@@ -368,6 +379,10 @@ async def cb_vidtools(_, query: CallbackQuery, obj: SelectMode):
                 if is_bold:
                     mode = "fontstyle"
             await obj.list_buttons(mode)
+        case "swfformat":
+            if len(data) == 3 and data[2] in ("mp4", "mkv"):
+                obj.extra_data["format"] = data[2]
+            await obj.list_buttons()
         case "sync_manual" | "sync_auto" as value:
             obj.extra_data["type"] = value
             await obj.list_buttons()

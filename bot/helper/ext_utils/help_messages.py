@@ -168,9 +168,12 @@ You can control this value. Example: /cmd -ss 6."""
 vid_tools = """<b>Video Tools</b>: -vt
 
 Opens an interactive menu (before the download starts) to trim, merge videos/audios/subs,
-watermark (with optional hardsub), compress, convert resolution, sync subtitles, or
-extract/remove streams from the downloaded file(s).
-/cmd link -vt"""
+watermark (with optional hardsub), compress, convert resolution, sync subtitles,
+extract/remove streams, or convert .swf files to MP4/MKV from the downloaded file(s).
+/cmd link -vt
+
+<b>SWF to MP4/MKV</b>: pick "SWF to MP4/MKV" in the -vt menu, then choose MP4 or MKV.
+Only SWF files with embedded video/audio can be converted (not vector animations/games)."""
 
 seed = """<b>Bittorrent seed</b>: -d
 

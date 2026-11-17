@@ -143,6 +143,8 @@ class VidExecutor:
                     return await self._rm_stream()
                 case "extract":
                     return await self._vid_extract()
+                case "swf2vid":
+                    return await self._swf_to_video(**kwargs)
                 case _:
                     return await self._vid_convert()
         except Exception as e:
@@ -721,6 +723,100 @@ class VidExecutor:
                     if rcode == 0:
                         extracted.append(outfile)
             results.extend(extracted or [video])
+        return await self._final_path(results[0] if len(results) == 1 else "")
+
+    # ------------------------------------------------------ swf -> video --
+    async def _get_swf_files(self):
+        """
+        .swf is listed in ARCH_EXT (7z can unpack it), so get_document_type()
+        treats it as an archive and _get_files() would skip it. SWF files are
+        therefore collected by extension here instead.
+        """
+        if await aiopath.isfile(self.path):
+            return [self.path] if self.path.lower().endswith(".swf") else []
+        swf_files = []
+        for dirpath, _, files in await sync_to_async(walk, self.path):
+            for file in natsorted(files):
+                if file.lower().endswith(".swf"):
+                    swf_files.append(ospath.join(dirpath, file))
+        return swf_files
+
+    async def _swf_to_video(self, format="mp4", **_):
+        """
+        Convert .swf -> .mp4 / .mkv (H.264 + AAC).
+
+        Limitation: ffmpeg only decodes the *media* inside a SWF (embedded
+        FLV/H.263/VP6/screen video and MP3/ADPCM audio). It does not run
+        ActionScript or draw vector animation, so games / pure vector
+        cartoons have no decodable stream and are reported as such.
+        """
+        files = await self._get_swf_files()
+        if not files:
+            await self.listener.on_upload_error("No .swf file found to convert!")
+            return self._up_path
+        fmt = format if format in ("mp4", "mkv") else "mp4"
+        await self._send_status()
+        results, converted, skipped = [], 0, []
+        for swf in files:
+            streams = await get_streams(swf) or []
+            if not any(s.get("codec_type") == "video" for s in streams):
+                LOGGER.error(f"SWF has no decodable video stream: {swf}")
+                skipped.append(ospath.basename(swf))
+                results.append(swf)
+                continue
+            base_name = ospath.splitext(swf)[0]
+            out_fmt = fmt
+            outfile = f"{base_name}.{out_fmt}"
+            # Custom name from the -vt Rename button (single file only). A
+            # .mp4/.mkv extension in the name wins over the format buttons.
+            if self.name and len(files) == 1:
+                out_fmt = (
+                    self.name.rsplit(".", 1)[-1].lower()
+                    if self.name.lower().endswith((".mp4", ".mkv"))
+                    else fmt
+                )
+                custom = (
+                    self.name
+                    if self.name.lower().endswith((".mp4", ".mkv"))
+                    else f"{self.name}.{out_fmt}"
+                )
+                outfile = ospath.join(ospath.dirname(swf), custom)
+            if await aiopath.exists(outfile):
+                outfile = f"{ospath.splitext(outfile)[0]}.converted.{out_fmt}"
+            cmd = self._base_cmd(
+                "-i", swf,
+                "-map", "0:v:0", "-map", "0:a?",
+                # libx264 + yuv420p need even width/height; SWF stages often don't
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "-c:v", "libx264", "-preset", Config.LIB264_PRESET,
+                "-crf", "23", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "128k",
+                *(["-movflags", "+faststart"] if out_fmt == "mp4" else []),
+                outfile,
+            )
+            total_time = (await get_media_info(swf))[0]
+            rcode = await self._run_cmd(cmd, total_time)
+            if self.listener.is_cancelled:
+                return self._up_path
+            if (
+                rcode == 0
+                and await aiopath.exists(outfile)
+                and await aiopath.getsize(outfile) > 0
+            ):
+                await clean_target(swf)
+                results.append(outfile)
+                converted += 1
+            else:
+                await clean_target(outfile)
+                skipped.append(ospath.basename(swf))
+                results.append(swf)
+        if not converted:
+            await self.listener.on_upload_error(
+                "SWF conversion failed! ffmpeg can only convert SWF files that contain "
+                "an embedded video/audio stream, not vector animations or games.\n"
+                f"Files: {', '.join(skipped)}"
+            )
+            return self._up_path
         return await self._final_path(results[0] if len(results) == 1 else "")
 
     # ------------------------------------------------------- subsync ---
