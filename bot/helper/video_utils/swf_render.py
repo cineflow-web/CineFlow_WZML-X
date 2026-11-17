@@ -137,22 +137,58 @@ def _cxform(r, alpha=True):
     r.align()
 
 
+def _inflate_salvage(data, chunk=512):
+    """zlib-inflate `data`; on corruption keep everything decoded so far.
+    Returns (bytes, error_or_None)."""
+    d = zlib.decompressobj()
+    out = bytearray()
+    try:
+        for i in range(0, len(data), chunk):
+            out += d.decompress(data[i : i + chunk])
+            if d.eof:
+                break
+    except zlib.error as e:
+        return bytes(out), str(e)
+    return bytes(out), None
+
+
 def _load(path):
     with open(path, "rb") as f:
         raw = f.read()
     sig = raw[:3]
+    warning = None
     if sig == b"FWS":
         body = raw[8:]
     elif sig == b"CWS":
-        body = zlib.decompress(raw[8:])
+        body, err = _inflate_salvage(raw[8:])
+        if err:
+            warning = f"corrupt compressed data after {len(body) // 1024} KB ({err})"
+        if len(body) < 32:
+            raise SWFError(f"SWF data unreadable: {err}")
     elif sig == b"ZWS":
         usize = struct.unpack_from("<I", raw, 4)[0] - 8
-        body = lzma.decompress(
-            raw[12:17] + struct.pack("<Q", usize) + raw[17:], format=lzma.FORMAT_ALONE
-        )
+        try:
+            body = lzma.decompress(
+                raw[12:17] + struct.pack("<Q", usize) + raw[17:], format=lzma.FORMAT_ALONE
+            )
+        except lzma.LZMAError as e:
+            # salvage a truncated/corrupt stream
+            dec = lzma.LZMADecompressor(
+                format=lzma.FORMAT_ALONE
+            )
+            hdr = raw[12:17] + struct.pack("<Q", usize)
+            out = bytearray()
+            try:
+                out += dec.decompress(hdr + raw[17:])
+            except lzma.LZMAError:
+                pass
+            body = bytes(out)
+            warning = f"corrupt LZMA data after {len(body) // 1024} KB ({e})"
+            if len(body) < 32:
+                raise SWFError(f"SWF data unreadable: {e}")
     else:
         raise SWFError("Not a SWF file")
-    return raw[3], body
+    return raw[3], body, warning
 
 
 def _tags(body, pos):
@@ -164,6 +200,8 @@ def _tags(body, pos):
         if length == 63:
             length = struct.unpack_from("<I", body, pos)[0]
             pos += 4
+        if pos + length > size:  # truncated final tag (corrupt/short file)
+            break
         yield code, pos, pos + length
         pos += length
         if code == _T_END:
@@ -384,7 +422,7 @@ def _decode_lossless(body, start, end, with_alpha):
 
 class SWFComposer:
     def __init__(self, path):
-        self.version, self.body = _load(path)
+        self.version, self.body, self.warning = _load(path)
         r = _Bits(self.body)
         xmin, xmax, ymin, ymax = _rect(r)
         self._xmin, self._ymin = xmin / TWIPS, ymin / TWIPS
@@ -654,6 +692,8 @@ def diagnose(path):
         print("PARSE FAILED:")
         traceback.print_exc()
         return
+    if comp.warning:
+        print("WARNING:", comp.warning)
     print(f"version={comp.version} size={comp.width}x{comp.height} fps={comp.fps:.2f} "
           f"frames={comp.frame_count} duration={comp.duration:.1f}s bitmaps={comp.has_bitmaps}")
     names = {1: "ShowFrame", 2: "Shape", 6: "Bits", 8: "JPEGTables", 9: "BG", 20: "Lossless",

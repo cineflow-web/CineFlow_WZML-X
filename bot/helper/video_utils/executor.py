@@ -812,6 +812,9 @@ class VidExecutor:
             self._swf_reason = comp.why_unsupported() or "no bitmap content"
             self._swf_not_applicable = True
             return -2
+        if comp.warning:
+            LOGGER.warning(f"SWF is damaged, converting the readable part only: {swf}: {comp.warning}")
+            self._swf_warning = comp.warning
         fps = comp.fps
         cmd = self._base_cmd(
             "-f", "rawvideo", "-pix_fmt", "rgb24",
