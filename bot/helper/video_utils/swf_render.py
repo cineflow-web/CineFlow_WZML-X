@@ -46,11 +46,14 @@ _T_PLACE_OBJECT2 = 26
 _T_REMOVE_OBJECT2 = 28
 _T_SHAPE3 = 32
 _T_JPEG3 = 35
+_T_PLACE_OBJECT3 = 70
+_T_SHAPE4 = 83
+_T_JPEG4 = 90
 _T_LOSSLESS2 = 36
 _T_END = 0
 
-_BITMAP_TAGS = {_T_DEFINE_BITS, _T_LOSSLESS, _T_JPEG2, _T_JPEG3, _T_LOSSLESS2}
-_SHAPE_TAGS = {_T_DEFINE_SHAPE: 1, _T_SHAPE2: 2, _T_SHAPE3: 3}
+_BITMAP_TAGS = {_T_DEFINE_BITS, _T_LOSSLESS, _T_JPEG2, _T_JPEG3, _T_LOSSLESS2, _T_JPEG4}
+_SHAPE_TAGS = {_T_DEFINE_SHAPE: 1, _T_SHAPE2: 2, _T_SHAPE3: 3, _T_SHAPE4: 4}
 
 
 class SWFError(Exception):
@@ -192,6 +195,10 @@ def _fill_styles(r, ver):
     count = r.u8()
     if count == 0xFF and ver >= 2:
         count = r.u16()
+    return _fill_styles_n(r, ver, count)
+
+
+def _fill_styles_n(r, ver, count):
     styles = []
     for _ in range(count):
         ftype = r.u8()
@@ -221,8 +228,18 @@ def _line_styles(r, ver):
     if count == 0xFF and ver >= 2:
         count = r.u16()
     for _ in range(count):
-        r.u16()
-        r.skip(4 if ver >= 3 else 3)
+        r.u16()  # width
+        if ver >= 4:  # LINESTYLE2
+            r.align()
+            flags = r.u16()
+            if (flags >> 12) & 3 == 2:  # miter join
+                r.u16()
+            if (flags >> 11) & 1:  # has fill
+                _fill_styles_n(r, ver, 1)
+            else:
+                r.skip(4)
+        else:
+            r.skip(4 if ver >= 3 else 3)
 
 
 def _parse_shape(body, start, end, ver):
@@ -230,6 +247,9 @@ def _parse_shape(body, start, end, ver):
     r = _Bits(body, start)
     shape_id = r.u16()
     _rect(r)
+    if ver >= 4:
+        _rect(r)  # edge bounds
+        r.u8()  # scaling-stroke flags
     fills = list(_fill_styles(r, ver))
     _line_styles(r, ver)
     nfill, nline = r.ub(4), r.ub(4)
@@ -302,39 +322,64 @@ def _parse_shape(body, start, end, ver):
 
 
 def _decode_jpeg(data):
-    if data[:4] == b"\xff\xd9\xff\xd8":
+    # old SWF encoders emit an erroneous EOI+SOI pair in front of the data
+    while data[:4] == b"\xff\xd9\xff\xd8":
         data = data[4:]
     img = Image.open(BytesIO(data))
+    img.load()
     return img.convert("RGBA") if img.mode in ("P", "RGBA", "LA") else img.convert("RGB")
 
 
 def _decode_lossless(body, start, end, with_alpha):
-    r = struct.unpack_from("<HBHH", body, start)
-    _, fmt, w, h = r
+    _, fmt, w, h = struct.unpack_from("<HBHH", body, start)
     pos = start + 7
+    ncolors = 0
     if fmt == 3:
         ncolors = body[pos] + 1
         pos += 1
     data = zlib.decompress(body[pos:end])
     if fmt == 5:
-        img = Image.frombuffer("RGBA", (w, h), data, "raw", "ARGB", 0, 1)
+        if len(data) < w * h * 4:
+            data = data + b"\0" * (w * h * 4 - len(data))
+        img = Image.frombuffer("RGBA", (w, h), data[: w * h * 4], "raw", "ARGB", 0, 1)
         if not with_alpha:
             img.putalpha(255)
         return img
     if fmt == 3:
         step = 4 if with_alpha else 3
         pal = data[: ncolors * step]
-        rows = data[ncolors * step :]
         stride = (w + 3) & ~3
-        pixels = bytearray()
+        rows = data[ncolors * step : ncolors * step + stride * h]
+        rows = rows + b"\0" * (stride * h - len(rows))
+        idx = Image.frombytes("P", (stride, h), rows).crop((0, 0, w, h))
+        rgb_pal = bytearray(768)
+        lut = bytearray([255]) * 256
+        for i in range(min(ncolors, 256)):
+            c = pal[i * step : i * step + step]
+            rgb_pal[i * 3 : i * 3 + 3] = c[:3]
+            if with_alpha:
+                lut[i] = c[3]
+        raw_idx = Image.frombytes("L", (stride, h), rows).crop((0, 0, w, h))
+        idx.putpalette(bytes(rgb_pal))
+        img = idx.convert("RGB").convert("RGBA")
+        if with_alpha:
+            img.putalpha(raw_idx.point(list(lut)))
+        return img
+    if fmt == 4:  # 15-bit RGB555, rows padded to 4 bytes
+        stride = ((w * 2) + 3) & ~3
+        out = bytearray(w * h * 3)
+        o = 0
         for row in range(h):
+            base = row * stride
             for col in range(w):
-                i = rows[row * stride + col]
-                c = pal[i * step : i * step + step] if i < ncolors else b"\0" * step
-                pixels += c if with_alpha else c + b"\xff"
-        # DefineBitsLossless2 palette entries are RGBA already
-        return Image.frombytes("RGBA", (w, h), bytes(pixels))
-    return None  # 15-bit etc.: unsupported
+                v = (data[base + col * 2] << 8) | data[base + col * 2 + 1]
+                r5, g5, b5 = (v >> 10) & 31, (v >> 5) & 31, v & 31
+                out[o] = (r5 << 3) | (r5 >> 2)
+                out[o + 1] = (g5 << 3) | (g5 >> 2)
+                out[o + 2] = (b5 << 3) | (b5 >> 2)
+                o += 3
+        return Image.frombytes("RGB", (w, h), bytes(out)).convert("RGBA")
+    return None
 
 
 class SWFComposer:
@@ -351,11 +396,32 @@ class SWFComposer:
         self.layers_drawn = 0
         self.frame_count = 0
         self.has_bitmaps = False
+        self.problems = {}
+        self.tag_counts = {}
         for code, _, _ in _tags(self.body, self._first_tag):
+            self.tag_counts[code] = self.tag_counts.get(code, 0) + 1
             if code == _T_SHOW_FRAME:
                 self.frame_count += 1
             elif code in _BITMAP_TAGS:
                 self.has_bitmaps = True
+
+    def why_unsupported(self):
+        """Short human readable reason this SWF cannot be rendered (or '')."""
+        tc = self.tag_counts
+        if not self.has_bitmaps:
+            extra = []
+            if tc.get(39):
+                extra.append("sprites/movie clips")
+            if tc.get(12) or tc.get(59):
+                extra.append("ActionScript")
+            if tc.get(60):
+                extra.append("embedded video stream")
+            return "no bitmap frames" + (f" (found: {', '.join(extra)})" if extra else "")
+        if not self.frame_count:
+            return "no frames on the main timeline (content is inside sprites)"
+        if tc.get(39) and not tc.get(_T_PLACE_OBJECT2, 0) + tc.get(_T_PLACE_OBJECT3, 0):
+            return "frames are drawn inside sprites/movie clips"
+        return ""
 
     @property
     def duration(self):
@@ -372,22 +438,33 @@ class SWFComposer:
             try:
                 if code == _T_JPEG2:
                     img = _decode_jpeg(self.body[s + 2 : e])
-                elif code == _T_JPEG3:
+                elif code in (_T_JPEG3, _T_JPEG4):
                     off = struct.unpack_from("<I", self.body, s + 2)[0]
-                    img = _decode_jpeg(self.body[s + 6 : s + 6 + off]).convert("RGBA")
+                    # JPEG3: id, alphaOffset | JPEG4: id, alphaOffset, deblock(u16)
+                    jpos = s + 6 if code == _T_JPEG3 else s + 8
+                    img = _decode_jpeg(self.body[jpos : jpos + off])
+                    if img.mode != "RGBA":
+                        img = img.convert("RGBA")
                     try:
-                        alpha = zlib.decompress(self.body[s + 6 + off : e])
+                        alpha = zlib.decompress(self.body[jpos + off : e])
                         if len(alpha) == img.width * img.height:
                             img.putalpha(Image.frombytes("L", img.size, alpha))
                     except zlib.error:
                         pass
                 elif code == _T_DEFINE_BITS:
                     tables = self._jpeg_tables or b"\xff\xd8\xff\xd9"
-                    img = _decode_jpeg(tables[:-2] + self.body[s + 4 : e])
+                    data = self.body[s + 2 : e]
+                    while data[:4] == b"\xff\xd9\xff\xd8":
+                        data = data[4:]
+                    if data[:2] == b"\xff\xd8":
+                        data = data[2:]
+                    tbl = tables[:-2] if tables[-2:] == b"\xff\xd9" else tables
+                    img = _decode_jpeg(tbl + data)
                 else:
                     img = _decode_lossless(self.body, s, e, code == _T_LOSSLESS2)
-            except Exception:
+            except Exception as exc:
                 img = None
+                self.problems["bitmap_decode"] = f"{type(exc).__name__}: {exc}"
         if len(self._bmp_cache) > 48:
             self._bmp_cache.pop(next(iter(self._bmp_cache)))
         self._bmp_cache[bid] = img
@@ -400,7 +477,8 @@ class SWFComposer:
         code, s, e, ver = ent
         try:
             _, parts = _parse_shape(self.body, s, e, ver)
-        except Exception:
+        except Exception as exc:
+            self.problems["shape_parse"] = f"{type(exc).__name__}: {exc}"
             return None
         drawables = [(st, polys) for st, polys in parts if st[0] in ("bitmap", "solid") and polys]
         if not drawables:
@@ -513,7 +591,7 @@ class SWFComposer:
             elif code == _T_BACKGROUND:
                 self._bg = tuple(self.body[s : s + 3])
                 dirty = True
-            elif code in (_T_PLACE_OBJECT, _T_PLACE_OBJECT2):
+            elif code in (_T_PLACE_OBJECT, _T_PLACE_OBJECT2, _T_PLACE_OBJECT3):
                 self._place(code, s, e)
                 dirty = True
             elif code == _T_REMOVE_OBJECT2:
@@ -537,7 +615,14 @@ class SWFComposer:
             self._display[depth] = (char_id, m)
             return
         flags = r.u8()
-        depth = r.u16()
+        if code == _T_PLACE_OBJECT3:
+            flags2 = r.u8()
+            depth = r.u16()
+            if flags2 & 0x08 or (flags2 & 0x10 and flags & 2):  # class name / image class
+                while r.u8():
+                    pass
+        else:
+            depth = r.u16()
         char_id = r.u16() if flags & 2 else None
         m = _matrix(r) if flags & 4 else None
         if flags & 8:
@@ -557,3 +642,24 @@ class SWFComposer:
         self._display[depth] = (char_id, m)
         if old and old[0] != char_id:
             self._forget(old[0])
+
+
+def diagnose(path):
+    """Print what a SWF contains and whether it can be rendered (debug helper)."""
+    comp = SWFComposer(path)
+    print(f"version={comp.version} size={comp.width}x{comp.height} fps={comp.fps:.2f} "
+          f"frames={comp.frame_count} duration={comp.duration:.1f}s bitmaps={comp.has_bitmaps}")
+    print("tag counts:", dict(sorted(comp.tag_counts.items())))
+    n = 0
+    for n, _ in enumerate(comp.frames(), 1):
+        if n >= 200:
+            break
+    print(f"rendered {n} frames, layers_drawn={comp.layers_drawn}, problems={comp.problems}")
+    reason = comp.why_unsupported()
+    print("unsupported reason:", reason or "-")
+
+
+if __name__ == "__main__":
+    import sys
+
+    diagnose(sys.argv[1])

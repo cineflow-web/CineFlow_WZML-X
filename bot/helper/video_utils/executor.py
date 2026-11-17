@@ -776,11 +776,19 @@ class VidExecutor:
             except Exception:
                 stderr = "Unable to decode the error!"
             LOGGER.error(f"VidExecutor SWF composite ffmpeg failed ({rcode}): {stderr}")
+            self._swf_reason = f"ffmpeg error: {str(stderr).splitlines()[-1][:150] if stderr else rcode}"
             return rcode
         if err or not written or not comp.layers_drawn:
             LOGGER.error(
                 f"SWF composite produced no usable picture "
-                f"(frames={written}, layers={comp.layers_drawn}, error={err})"
+                f"(frames={written}, layers={comp.layers_drawn}, error={err}, "
+                f"problems={comp.problems}, tags={comp.tag_counts})"
+            )
+            self._swf_reason = (
+                err
+                or "; ".join(f"{k}: {v}" for k, v in comp.problems.items())
+                or comp.why_unsupported()
+                or "no bitmap layers could be drawn"
             )
             return -2
         return 0
@@ -795,10 +803,14 @@ class VidExecutor:
         try:
             comp = await sync_to_async(SWFComposer, swf)
         except Exception as e:
-            LOGGER.error(f"SWF parse failed for {swf}: {e}")
+            LOGGER.error(f"SWF parse failed for {swf}: {e}", exc_info=True)
+            self._swf_reason = f"SWF parse failed: {type(e).__name__}: {e}"
+            self._swf_not_applicable = True
             return -2
         if not comp.has_bitmaps or not comp.frame_count:
-            LOGGER.error(f"SWF has no bitmap content to render: {swf}")
+            LOGGER.error(f"SWF has no bitmap content to render: {swf} tags={comp.tag_counts}")
+            self._swf_reason = comp.why_unsupported() or "no bitmap content"
+            self._swf_not_applicable = True
             return -2
         fps = comp.fps
         cmd = self._base_cmd(
@@ -863,10 +875,12 @@ class VidExecutor:
                 outfile = ospath.join(ospath.dirname(swf), custom)
             if await aiopath.exists(outfile):
                 outfile = f"{ospath.splitext(outfile)[0]}.converted.{out_fmt}"
-            if vstream is not None:
+            self._swf_reason, self._swf_not_applicable = "", False
+
+            async def _plain(vindex):
                 cmd = self._base_cmd(
                     "-i", swf,
-                    "-map", f"0:{vstream['index']}", "-map", "0:a?",
+                    "-map", f"0:{vindex}", "-map", "0:a?",
                     # libx264 + yuv420p need even width/height; SWF stages often don't
                     "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                     "-c:v", "libx264", "-preset", Config.LIB264_PRESET,
@@ -876,9 +890,36 @@ class VidExecutor:
                     outfile,
                 )
                 total_time = (await get_media_info(swf))[0]
-                rcode = await self._run_cmd(cmd, total_time)
+                return await self._run_cmd(cmd, total_time)
+
+            if vstream is not None:
+                rcode = await _plain(vstream["index"])
+                if rcode != 0 and not self.listener.is_cancelled:
+                    # ffmpeg can't decode this stream (e.g. Screen Video v2):
+                    # fall back to the bitmap compositor before giving up
+                    LOGGER.warning(f"SWF plain ffmpeg path failed ({rcode}), trying compositor: {swf}")
+                    await clean_target(outfile)
+                    rcode = await self._swf_composite(swf, outfile, out_fmt)
+                    if rcode != 0:
+                        self._swf_reason = (
+                            f"ffmpeg can't decode the {vstream.get('codec_name')} video stream"
+                            f" and compositor said: {self._swf_reason or 'n/a'}"
+                        )
             else:
                 rcode = await self._swf_composite(swf, outfile, out_fmt)
+                if rcode != 0 and self._swf_not_applicable and not self.listener.is_cancelled:
+                    # compositor not applicable: last resort, ffmpeg's own demuxer
+                    vidx = next(
+                        (s_["index"] for s_ in streams
+                         if s_.get("codec_type") == "video" and s_.get("codec_name")),
+                        None,
+                    )
+                    if vidx is not None:
+                        await clean_target(outfile)
+                        prev = self._swf_reason
+                        rcode = await _plain(vidx)
+                        if rcode != 0:
+                            self._swf_reason = prev
             if self.listener.is_cancelled:
                 return self._up_path
             if (
@@ -891,14 +932,16 @@ class VidExecutor:
                 converted += 1
             else:
                 await clean_target(outfile)
-                skipped.append(ospath.basename(swf))
+                reason = self._swf_reason or "unknown error (check bot log)"
+                LOGGER.error(f"SWF conversion failed for {swf}: {reason}")
+                skipped.append(f"{ospath.basename(swf)} — {reason}")
                 results.append(swf)
         if not converted:
             await self.listener.on_upload_error(
                 "SWF conversion failed! Only SWF files that contain embedded video/audio "
                 "or bitmap (slide/screen recording) frames can be converted, not vector "
                 "animations or ActionScript games.\n"
-                f"Files: {', '.join(skipped)}"
+                "Files:\n" + "\n".join(skipped)
             )
             return self._up_path
         return await self._final_path(results[0] if len(results) == 1 else "")
