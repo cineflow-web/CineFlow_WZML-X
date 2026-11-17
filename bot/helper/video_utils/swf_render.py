@@ -646,17 +646,40 @@ class SWFComposer:
 
 def diagnose(path):
     """Print what a SWF contains and whether it can be rendered (debug helper)."""
-    comp = SWFComposer(path)
+    import traceback
+
+    try:
+        comp = SWFComposer(path)
+    except Exception:
+        print("PARSE FAILED:")
+        traceback.print_exc()
+        return
     print(f"version={comp.version} size={comp.width}x{comp.height} fps={comp.fps:.2f} "
           f"frames={comp.frame_count} duration={comp.duration:.1f}s bitmaps={comp.has_bitmaps}")
-    print("tag counts:", dict(sorted(comp.tag_counts.items())))
-    n = 0
-    for n, _ in enumerate(comp.frames(), 1):
-        if n >= 200:
+    names = {1: "ShowFrame", 2: "Shape", 6: "Bits", 8: "JPEGTables", 9: "BG", 20: "Lossless",
+             21: "JPEG2", 22: "Shape2", 26: "Place2", 28: "Remove2", 32: "Shape3", 35: "JPEG3",
+             36: "Lossless2", 39: "Sprite", 70: "Place3", 83: "Shape4", 90: "JPEG4", 60: "VideoStream",
+             61: "VideoFrame", 18: "SoundStreamHead", 19: "SoundStreamBlock", 12: "DoAction",
+             82: "DoABC", 69: "FileAttributes", 76: "SymbolClass"}
+    print("tag counts:", {names.get(k, k): v for k, v in sorted(comp.tag_counts.items())})
+    first = []
+    for code, s, e in _tags(comp.body, comp._first_tag):
+        first.append(f"{names.get(code, code)}({e - s})")
+        if len(first) >= 40:
             break
+    print("first tags:", " ".join(first))
+    n = 0
+    try:
+        for n, fr in enumerate(comp.frames(), 1):
+            if n in (30, 300):
+                Image.frombytes("RGB", (comp.width, comp.height), fr).save(f"swf_frame_{n}.png")
+                print(f"saved swf_frame_{n}.png")
+            if n >= 300:
+                break
+    except Exception:
+        traceback.print_exc()
     print(f"rendered {n} frames, layers_drawn={comp.layers_drawn}, problems={comp.problems}")
-    reason = comp.why_unsupported()
-    print("unsupported reason:", reason or "-")
+    print("unsupported reason:", comp.why_unsupported() or "-")
 
 
 if __name__ == "__main__":

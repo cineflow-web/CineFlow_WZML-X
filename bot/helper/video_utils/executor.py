@@ -907,19 +907,6 @@ class VidExecutor:
                         )
             else:
                 rcode = await self._swf_composite(swf, outfile, out_fmt)
-                if rcode != 0 and self._swf_not_applicable and not self.listener.is_cancelled:
-                    # compositor not applicable: last resort, ffmpeg's own demuxer
-                    vidx = next(
-                        (s_["index"] for s_ in streams
-                         if s_.get("codec_type") == "video" and s_.get("codec_name")),
-                        None,
-                    )
-                    if vidx is not None:
-                        await clean_target(outfile)
-                        prev = self._swf_reason
-                        rcode = await _plain(vidx)
-                        if rcode != 0:
-                            self._swf_reason = prev
             if self.listener.is_cancelled:
                 return self._up_path
             if (
