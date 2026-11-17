@@ -173,7 +173,7 @@ extract/remove streams, or convert .swf files to MP4/MKV from the downloaded fil
 /cmd link -vt
 
 <b>SWF to MP4/MKV</b>: pick "SWF to MP4/MKV" in the -vt menu, then choose MP4 or MKV.
-Only SWF files with embedded video/audio can be converted (not vector animations/games)."""
+Works for SWFs with embedded video or bitmap (slide/screen recording) frames; vector animations and ActionScript games can't be converted."""
 
 seed = """<b>Bittorrent seed</b>: -d
 

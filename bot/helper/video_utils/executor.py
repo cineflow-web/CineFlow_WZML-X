@@ -1,15 +1,16 @@
 from __future__ import annotations
 from aiofiles.os import path as aiopath
 from ast import literal_eval
-from asyncio import create_subprocess_exec
+from asyncio import create_subprocess_exec, get_running_loop
 from asyncio.subprocess import PIPE
 from langcodes import Language, find as find_language
 from natsort import natsorted
-from os import path as ospath, walk
+from os import path as ospath, walk, pipe, close as os_close, fdopen
 import re
 
 from . import VID_MODE
 from .extra_selector import ExtraSelect
+from .swf_render import SWFComposer
 from ... import LOGGER, task_dict, task_dict_lock, ff_cores, ff_threads
 from ...core.config_manager import Config, BinConfig
 from ..ext_utils.bot_lock import ff_lock
@@ -741,14 +742,89 @@ class VidExecutor:
                     swf_files.append(ospath.join(dirpath, file))
         return swf_files
 
+    async def _run_cmd_composed(self, cmd, total_time, comp):
+        """Like _run_cmd, but ffmpeg's stdin is fed frames composited from the SWF."""
+        if self.listener.is_cancelled:
+            return -1
+        self._eng.clear()
+        self._eng._total_time = total_time or 1
+        full_cmd = ["taskset", "-c", f"{ff_cores}"] + cmd
+        rfd, wfd = pipe()
+        feeder = None
+        try:
+            async with ff_lock:
+                self.listener.subproc = await create_subprocess_exec(
+                    *full_cmd, stdin=rfd, stdout=PIPE, stderr=PIPE
+                )
+                os_close(rfd)  # the child owns the read end now
+                rfd = None
+                feeder = get_running_loop().run_in_executor(None, _feed_frames, comp, wfd)
+                wfd = None  # closed by the feeder thread
+                await self._eng._ffmpeg_progress()
+                _, stderr = await self.listener.subproc.communicate()
+                written, err = await feeder
+        finally:
+            for fd in (rfd, wfd):
+                if fd is not None:
+                    os_close(fd)
+        rcode = self.listener.subproc.returncode
+        if self.listener.is_cancelled:
+            return -1
+        if rcode != 0:
+            try:
+                stderr = stderr.decode().strip()
+            except Exception:
+                stderr = "Unable to decode the error!"
+            LOGGER.error(f"VidExecutor SWF composite ffmpeg failed ({rcode}): {stderr}")
+            return rcode
+        if err or not written or not comp.layers_drawn:
+            LOGGER.error(
+                f"SWF composite produced no usable picture "
+                f"(frames={written}, layers={comp.layers_drawn}, error={err})"
+            )
+            return -2
+        return 0
+
+    async def _swf_composite(self, swf, outfile, out_fmt):
+        """
+        SWFs that are bitmap slideshows / screen recordings (JPEG patches placed
+        by DefineShape + PlaceObject2) are rendered by our own compositor,
+        because ffmpeg ignores the placement and stretches every patch over the
+        whole picture. Returns an ffmpeg-style return code (0 = success).
+        """
+        try:
+            comp = await sync_to_async(SWFComposer, swf)
+        except Exception as e:
+            LOGGER.error(f"SWF parse failed for {swf}: {e}")
+            return -2
+        if not comp.has_bitmaps or not comp.frame_count:
+            LOGGER.error(f"SWF has no bitmap content to render: {swf}")
+            return -2
+        fps = comp.fps
+        cmd = self._base_cmd(
+            "-f", "rawvideo", "-pix_fmt", "rgb24",
+            "-video_size", f"{comp.width}x{comp.height}",
+            "-framerate", f"{fps}", "-i", "pipe:0",
+            "-i", swf,
+            "-map", "0:v:0", "-map", "1:a:0?",
+            "-c:v", "libx264", "-preset", Config.LIB264_PRESET,
+            "-tune", "stillimage", "-crf", "26", "-pix_fmt", "yuv420p",
+            "-g", str(max(1, int(fps * 10))),
+            "-c:a", "aac", "-b:a", "128k",
+            *(["-movflags", "+faststart"] if out_fmt == "mp4" else []),
+            outfile,
+        )
+        return await self._run_cmd_composed(cmd, comp.duration, comp)
+
     async def _swf_to_video(self, format="mp4", **_):
         """
         Convert .swf -> .mp4 / .mkv (H.264 + AAC).
 
-        Limitation: ffmpeg only decodes the *media* inside a SWF (embedded
-        FLV/H.263/VP6/screen video and MP3/ADPCM audio). It does not run
-        ActionScript or draw vector animation, so games / pure vector
-        cartoons have no decodable stream and are reported as such.
+        Two paths:
+        * SWF with real embedded video (FLV/H.263/VP6/screen video): plain ffmpeg.
+        * SWF made of bitmaps (screen recordings / slide recordings): the
+          timeline is composited by swf_render.SWFComposer and piped to ffmpeg.
+        Not supported: ActionScript / vector animation / games (nothing to decode).
         """
         files = await self._get_swf_files()
         if not files:
@@ -759,11 +835,15 @@ class VidExecutor:
         results, converted, skipped = [], 0, []
         for swf in files:
             streams = await get_streams(swf) or []
-            if not any(s.get("codec_type") == "video" for s in streams):
-                LOGGER.error(f"SWF has no decodable video stream: {swf}")
-                skipped.append(ospath.basename(swf))
-                results.append(swf)
-                continue
+            vstream = next(
+                (
+                    s for s in streams
+                    if s.get("codec_type") == "video"
+                    and s.get("codec_name")  # undecodable streams have no codec name
+                    and s["codec_name"] not in _SWF_BITMAP_CODECS
+                ),
+                None,
+            )
             base_name = ospath.splitext(swf)[0]
             out_fmt = fmt
             outfile = f"{base_name}.{out_fmt}"
@@ -783,19 +863,22 @@ class VidExecutor:
                 outfile = ospath.join(ospath.dirname(swf), custom)
             if await aiopath.exists(outfile):
                 outfile = f"{ospath.splitext(outfile)[0]}.converted.{out_fmt}"
-            cmd = self._base_cmd(
-                "-i", swf,
-                "-map", "0:v:0", "-map", "0:a?",
-                # libx264 + yuv420p need even width/height; SWF stages often don't
-                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                "-c:v", "libx264", "-preset", Config.LIB264_PRESET,
-                "-crf", "23", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "128k",
-                *(["-movflags", "+faststart"] if out_fmt == "mp4" else []),
-                outfile,
-            )
-            total_time = (await get_media_info(swf))[0]
-            rcode = await self._run_cmd(cmd, total_time)
+            if vstream is not None:
+                cmd = self._base_cmd(
+                    "-i", swf,
+                    "-map", f"0:{vstream['index']}", "-map", "0:a?",
+                    # libx264 + yuv420p need even width/height; SWF stages often don't
+                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-c:v", "libx264", "-preset", Config.LIB264_PRESET,
+                    "-crf", "23", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "128k",
+                    *(["-movflags", "+faststart"] if out_fmt == "mp4" else []),
+                    outfile,
+                )
+                total_time = (await get_media_info(swf))[0]
+                rcode = await self._run_cmd(cmd, total_time)
+            else:
+                rcode = await self._swf_composite(swf, outfile, out_fmt)
             if self.listener.is_cancelled:
                 return self._up_path
             if (
@@ -812,8 +895,9 @@ class VidExecutor:
                 results.append(swf)
         if not converted:
             await self.listener.on_upload_error(
-                "SWF conversion failed! ffmpeg can only convert SWF files that contain "
-                "an embedded video/audio stream, not vector animations or games.\n"
+                "SWF conversion failed! Only SWF files that contain embedded video/audio "
+                "or bitmap (slide/screen recording) frames can be converted, not vector "
+                "animations or ActionScript games.\n"
                 f"Files: {', '.join(skipped)}"
             )
             return self._up_path
@@ -856,6 +940,29 @@ class VidExecutor:
                 LOGGER.error(f"alass sync failed: {stderr}")
                 results.append(target)
         return await self._final_path(results[0] if len(results) == 1 else "")
+
+
+# codecs ffmpeg's swf demuxer uses for plain embedded bitmaps (not real video)
+_SWF_BITMAP_CODECS = {"mjpeg", "png", "bmp", "rawvideo", "gif", "jpeg2000", "none"}
+
+
+def _feed_frames(comp, wfd):
+    """
+    Thread body: composite the SWF timeline and write raw rgb24 frames into
+    the pipe ffmpeg reads from. Returns (frames_written, error_or_None).
+    """
+    written = 0
+    try:
+        with fdopen(wfd, "wb") as out:
+            for frame in comp.frames():
+                out.write(frame)
+                written += 1
+    except BrokenPipeError:
+        pass  # ffmpeg exited or the task was cancelled
+    except Exception as e:
+        LOGGER.error(f"SWF composer failed: {e}", exc_info=True)
+        return written, str(e)
+    return written, None
 
 
 def _write_text(path, content):
