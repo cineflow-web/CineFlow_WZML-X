@@ -12,4 +12,5 @@ VID_MODE = {
     "extract": "Extract Stream",
     "convert": "Convert Resolution",
     "swf2vid": "SWF to MP4/MKV",
+    "flv2vid": "FLV to MP4/MKV",
 }

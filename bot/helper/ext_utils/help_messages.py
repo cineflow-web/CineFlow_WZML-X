@@ -169,11 +169,14 @@ vid_tools = """<b>Video Tools</b>: -vt
 
 Opens an interactive menu (before the download starts) to trim, merge videos/audios/subs,
 watermark (with optional hardsub), compress, convert resolution, sync subtitles,
-extract/remove streams, or convert .swf files to MP4/MKV from the downloaded file(s).
+extract/remove streams, or convert .swf / .flv files to MP4/MKV from the downloaded file(s).
 /cmd link -vt
 
 <b>SWF to MP4/MKV</b>: pick "SWF to MP4/MKV" in the -vt menu, then choose MP4 or MKV.
-Works for SWFs with embedded video or bitmap (slide/screen recording) frames; vector animations and ActionScript games can't be converted."""
+Works for SWFs with embedded video or bitmap (slide/screen recording) frames; vector animations and ActionScript games can't be converted.
+
+<b>FLV to MP4/MKV</b>: pick "FLV to MP4/MKV" in the -vt menu, then choose MP4 or MKV.
+H.264/AAC FLVs are remuxed instantly without quality loss; older codecs (H.263, VP6, Speex, Nellymoser) are transcoded to H.264/AAC."""
 
 seed = """<b>Bittorrent seed</b>: -d
 

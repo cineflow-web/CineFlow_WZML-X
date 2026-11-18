@@ -146,6 +146,8 @@ class VidExecutor:
                     return await self._vid_extract()
                 case "swf2vid":
                     return await self._swf_to_video(**kwargs)
+                case "flv2vid":
+                    return await self._flv_to_video(**kwargs)
                 case _:
                     return await self._vid_convert()
         except Exception as e:
@@ -932,6 +934,118 @@ class VidExecutor:
                 "or bitmap (slide/screen recording) frames can be converted, not vector "
                 "animations or ActionScript games.\n"
                 "Files:\n" + "\n".join(skipped)
+            )
+            return self._up_path
+        return await self._final_path(results[0] if len(results) == 1 else "")
+
+    # ------------------------------------------------------ flv -> video --
+    async def _get_flv_files(self):
+        """Collect .flv files by extension (works for a single file or a folder)."""
+        if await aiopath.isfile(self.path):
+            return [self.path] if self.path.lower().endswith(".flv") else []
+        flv_files = []
+        for dirpath, _, files in await sync_to_async(walk, self.path):
+            for file in natsorted(files):
+                if file.lower().endswith(".flv"):
+                    flv_files.append(ospath.join(dirpath, file))
+        return flv_files
+
+    async def _flv_to_video(self, format="mp4", **_):
+        """
+        Convert .flv -> .mp4 / .mkv.
+
+        H.264 video and AAC/MP3 audio (the usual modern FLV) are remuxed with
+        stream copy: instant and lossless. Old FLVs (Sorenson H.263 / VP6 video,
+        Nellymoser / Speex / ADPCM audio) are transcoded to H.264 + AAC. If the
+        copy attempt fails for any reason, it falls back to a full transcode.
+        """
+        files = await self._get_flv_files()
+        if not files:
+            await self.listener.on_upload_error("No .flv file found to convert!")
+            return self._up_path
+        fmt = format if format in ("mp4", "mkv") else "mp4"
+        await self._send_status()
+        results, converted, skipped = [], 0, []
+        for flv in files:
+            streams = await get_streams(flv) or []
+            vstream = next(
+                (s for s in streams if s.get("codec_type") == "video" and s.get("codec_name")),
+                None,
+            )
+            astream = next(
+                (s for s in streams if s.get("codec_type") == "audio" and s.get("codec_name")),
+                None,
+            )
+            if vstream is None and astream is None:
+                skipped.append(f"{ospath.basename(flv)} — no readable audio/video stream")
+                results.append(flv)
+                continue
+            out_fmt = fmt
+            outfile = f"{ospath.splitext(flv)[0]}.{out_fmt}"
+            if self.name and len(files) == 1:
+                out_fmt = (
+                    self.name.rsplit(".", 1)[-1].lower()
+                    if self.name.lower().endswith((".mp4", ".mkv"))
+                    else fmt
+                )
+                custom = (
+                    self.name
+                    if self.name.lower().endswith((".mp4", ".mkv"))
+                    else f"{self.name}.{out_fmt}"
+                )
+                outfile = ospath.join(ospath.dirname(flv), custom)
+            if await aiopath.exists(outfile):
+                outfile = f"{ospath.splitext(outfile)[0]}.converted.{out_fmt}"
+            total_time = (await get_media_info(flv))[0]
+
+            can_copy_v = vstream is None or vstream["codec_name"] == "h264"
+            can_copy_a = astream is None or astream["codec_name"] in ("aac", "mp3")
+            faststart = ["-movflags", "+faststart"] if out_fmt == "mp4" else []
+
+            def _cmd(copy):
+                vcodec = (
+                    ["-c:v", "copy"]
+                    if copy and can_copy_v
+                    else [
+                        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                        "-c:v", "libx264", "-preset", Config.LIB264_PRESET,
+                        "-crf", "23", "-pix_fmt", "yuv420p",
+                    ]
+                )
+                acodec = (
+                    ["-c:a", "copy"] if copy and can_copy_a else ["-c:a", "aac", "-b:a", "128k"]
+                )
+                return self._base_cmd(
+                    "-fflags", "+genpts+discardcorrupt", "-i", flv,
+                    "-map", "0:v:0?", "-map", "0:a:0?",
+                    *vcodec, *acodec, *faststart, outfile,
+                )
+
+            rcode = await self._run_cmd(_cmd(copy=True), total_time)
+            if self.listener.is_cancelled:
+                return self._up_path
+            if rcode != 0 and (can_copy_v or can_copy_a):
+                # stream copy failed: redo as a full transcode
+                LOGGER.warning(f"FLV remux failed ({rcode}), transcoding: {flv}")
+                await clean_target(outfile)
+                rcode = await self._run_cmd(_cmd(copy=False), total_time)
+            if self.listener.is_cancelled:
+                return self._up_path
+            if (
+                rcode == 0
+                and await aiopath.exists(outfile)
+                and await aiopath.getsize(outfile) > 0
+            ):
+                await clean_target(flv)
+                results.append(outfile)
+                converted += 1
+            else:
+                await clean_target(outfile)
+                skipped.append(f"{ospath.basename(flv)} — ffmpeg failed (check bot log)")
+                results.append(flv)
+        if not converted:
+            await self.listener.on_upload_error(
+                "FLV conversion failed!\nFiles:\n" + "\n".join(skipped)
             )
             return self._up_path
         return await self._final_path(results[0] if len(results) == 1 else "")

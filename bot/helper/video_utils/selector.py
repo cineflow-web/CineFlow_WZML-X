@@ -91,7 +91,7 @@ class SelectMode:
                     msg += f"\nFont Size: <b>{fontsize}</b>"
                 if fontcolour := self.extra_data.get("fontcolour"):
                     msg += f"\nFont Colour: <b>{fontcolour}</b>"
-        if self.mode == "swf2vid":
+        if self.mode in ("swf2vid", "flv2vid"):
             msg += f"\nOutput Format: <b>{self.extra_data.get('format', 'mp4').upper()}</b>"
         if quality := self.extra_data.get("quality"):
             msg += f"\nQuality: <b>{quality}</b>"
@@ -167,7 +167,7 @@ class SelectMode:
                     "header",
                 )
 
-            if self.mode == "swf2vid":
+            if self.mode in ("swf2vid", "flv2vid"):
                 swf_fmt = self.extra_data.get("format", "mp4")
                 for fmt in ("mp4", "mkv"):
                     buttons.data_button(
